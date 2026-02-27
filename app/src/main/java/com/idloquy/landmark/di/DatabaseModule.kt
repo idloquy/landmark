@@ -4,6 +4,7 @@ import android.content.Context
 import androidx.room.Room
 import com.idloquy.landmark.data.database.LandmarkDatabase
 import com.idloquy.landmark.data.database.dao.MarkDao
+import com.idloquy.landmark.data.database.dao.SharedMarkGroupDao
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -21,7 +22,8 @@ object DatabaseModule {
             context = context,
             klass = LandmarkDatabase::class.java,
             name = "data.db",
-        ).build()
+        )
+            .build()
     }
 
     @Provides
@@ -29,5 +31,12 @@ object DatabaseModule {
         landmarkDatabase: LandmarkDatabase,
     ): MarkDao {
         return landmarkDatabase.markDao()
+    }
+
+    @Provides
+    fun provideSharedMarkGroupDao(
+        landmarkDatabase: LandmarkDatabase,
+    ): SharedMarkGroupDao {
+        return landmarkDatabase.sharedMarkGroupDao()
     }
 }

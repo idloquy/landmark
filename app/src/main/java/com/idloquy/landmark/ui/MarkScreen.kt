@@ -1,5 +1,6 @@
 package com.idloquy.landmark.ui
 
+import android.util.Log
 import android.widget.Toast
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
@@ -34,17 +35,50 @@ import androidx.compose.ui.unit.sp
 import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.idloquy.landmark.data.database.model.Mark
+import com.idloquy.landmark.data.database.model.SharedMarkGroup
+import com.idloquy.landmark.data.repository.exceptions.InvalidMarkIdException
 import com.idloquy.landmark.model.Location
+import com.idloquy.landmark.ui.shared_marks.ProgressIndicatorDialog
+import com.idloquy.landmark.ui.shared_marks.SharedMarksErrorDialog
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.onEach
 
 @Composable
 fun MarkScreen(
     markId: Int,
+    groupId: String?,
     viewModel: LandmarkViewModel = hiltViewModel(),
     onBack: () -> Unit,
 ) {
     val context = LocalContext.current
-    val mark by viewModel.getMarkById(markId).onEach {
+
+    val group by if (groupId != null) {
+        viewModel.getSharedMarkGroupById(groupId).onEach {
+            if (it == null) {
+                Toast(context).apply {
+                    setText("Group deleted")
+                }.show()
+                onBack()
+            }
+        }.collectAsStateWithLifecycle(null)
+    } else {
+        flowOf(null).collectAsStateWithLifecycle(null)
+    }
+
+    val sharedMark = if (groupId != null) {
+        viewModel.getSharedMarkById(groupId, markId)
+    } else {
+        flowOf(null)
+    }
+
+    val currentSharedMark by sharedMark.collectAsStateWithLifecycle(null)
+
+    val mark by if (groupId != null) {
+        sharedMark.map { it?.let { Mark(location = it.location, description = it.description) } }
+    } else {
+        viewModel.getMarkById(markId)
+    }.onEach {
         if (it == null) {
             Toast(context).apply {
                 setText("Mark deleted")
@@ -53,26 +87,126 @@ fun MarkScreen(
         }
     }.collectAsStateWithLifecycle(null)
 
+    var indicatorText by rememberSaveable { mutableStateOf("") }
+
+    var updateError by rememberSaveable { mutableStateOf<Exception?>(null) }
+    var deleteError by rememberSaveable { mutableStateOf<Exception?>(null) }
+
     MarkContent(
         mark = mark,
+        group = group,
+        isShared = groupId != null,
         onUpdate = { mark ->
-            viewModel.updateMark(mark)
+            if (groupId == null) {
+                viewModel.updateMark(mark)
+            } else {
+                indicatorText = "Updating mark..."
+
+                viewModel.updateMarkForGroup(
+                    group = group!!,
+                    mark = currentSharedMark!!.copy(description = mark.description),
+                    onSuccess = {
+                        indicatorText = ""
+                    },
+                    onError = {
+                        Log.d("landmark", "error updating: $it")
+                        if (it is InvalidMarkIdException) {
+                            Toast(context).apply {
+                                setText("Mark deleted")
+                            }.show()
+
+                            indicatorText = "Handling deleted mark..."
+
+                            viewModel.deleteMarkForGroup(
+                                group = group!!,
+                                mark = currentSharedMark!!,
+                                onSuccess = {
+                                    indicatorText = ""
+                                    onBack()
+                                },
+                                onError = {
+                                    indicatorText = ""
+                                    deleteError = it
+                                },
+                            )
+
+                            return@updateMarkForGroup
+                        }
+
+                        indicatorText = ""
+                        updateError = it
+                    }
+                )
+            }
         },
         onDelete = {
-            viewModel.deleteMark(mark!!)
-            Toast(context).apply {
-                setText("Mark deleted")
-            }.show()
-            onBack()
+            if (groupId == null) {
+                viewModel.deleteMark(
+                    mark = mark!!,
+                    onSuccess = {
+                        Toast(context).apply {
+                            setText("Mark deleted")
+                        }.show()
+                        onBack()
+                    },
+                )
+            } else {
+                indicatorText = "Deleting mark..."
+
+                viewModel.deleteMarkForGroup(
+                    group = group!!,
+                    mark = currentSharedMark!!,
+                    onSuccess = {
+                        Toast(context).apply {
+                            setText("Mark deleted")
+                        }.show()
+
+                        indicatorText = ""
+                        onBack()
+                    },
+                    onError = {
+                        indicatorText = ""
+                        deleteError = it
+                    })
+            }
         },
         onBack = onBack
     )
+
+    if (updateError != null) {
+        updateError?.let {
+            SharedMarksErrorDialog(
+                "Failed to update mark",
+                error = it,
+                onDismiss = { updateError = null },
+            )
+        }
+    }
+
+    if (deleteError != null) {
+        deleteError?.let {
+            SharedMarksErrorDialog(
+                "Failed to delete mark",
+                error = it,
+                onDismiss = { deleteError = null },
+            )
+        }
+    }
+
+    if (indicatorText.isNotEmpty()) {
+        ProgressIndicatorDialog(
+            onDismiss = { indicatorText = "" },
+            text = indicatorText,
+        )
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun MarkContent(
     mark: Mark?,
+    group: SharedMarkGroup?,
+    isShared: Boolean,
     onUpdate: (Mark) -> Unit,
     onDelete: () -> Unit,
     onBack: () -> Unit,
@@ -83,48 +217,47 @@ fun MarkContent(
         topBar = {
             TopAppBar(
                 title = {
-                    Text(
-                        text = "Mark",
-                        fontWeight = FontWeight.Bold,
+                Text(
+                    text = "Mark",
+                    fontWeight = FontWeight.Bold,
+                )
+            }, navigationIcon = {
+                IconButton(
+                    onClick = onBack,
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
                     )
-                },
-                navigationIcon = {
+                }
+            }, actions = {
+                if (mark != null && (!isShared || (group != null && group.editToken.isNotEmpty()))) {
                     IconButton(
-                        onClick = onBack,
+                        onClick = onDelete,
                     ) {
                         Icon(
-                            imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                            contentDescription = "Back",
+                            imageVector = Icons.Default.Delete,
+                            contentDescription = "Delete",
                             tint = MaterialTheme.colorScheme.onPrimaryContainer,
                         )
                     }
-                },
-                actions = {
-                    if (mark != null) {
-                        IconButton(
-                            onClick = { showEditDialog = true },
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Edit,
-                                contentDescription = "Edit",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
 
-                        IconButton(
-                            onClick = onDelete,
-                        ) {
-                            Icon(
-                                imageVector = Icons.Default.Delete,
-                                contentDescription = "Delete",
-                                tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                            )
-                        }
+                    IconButton(
+                        onClick = { showEditDialog = true },
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.Edit,
+                            contentDescription = "Edit",
+                            tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                        )
                     }
-                }, colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.primaryContainer,
-                    titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
+
+                }
+            }, colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            )
             )
         }
     ) { paddingValues ->
@@ -134,7 +267,7 @@ fun MarkContent(
                 .padding(paddingValues)
                 .padding(20.dp)
         ) {
-            if (mark != null) {
+            if (mark != null && (!isShared || group != null)) {
                 LocationRow(mark.location)
 
                 Spacer(Modifier.height(10.dp))
@@ -147,9 +280,9 @@ fun MarkContent(
                 if (showEditDialog) {
                     MarkLocationDialog(
                         Location(
-                            mark.location.latitude,
-                            mark.location.longitude,
-                        ),
+                        mark.location.latitude,
+                        mark.location.longitude,
+                    ),
                         description = mark.description,
                         onDismiss = { showEditDialog = false },
                         onMark = { _, description ->
@@ -157,8 +290,7 @@ fun MarkContent(
                                 mark.copy(description = description)
                             )
                             showEditDialog = false
-                        }
-                    )
+                        })
                 }
             } else {
                 Column(
@@ -187,6 +319,8 @@ fun MarkScreenPreview() {
             ),
             description = "test",
         ),
+        group = null,
+        isShared = false,
         onUpdate = {},
         onDelete = {},
         onBack = {},
@@ -198,6 +332,8 @@ fun MarkScreenPreview() {
 fun MarkScreenNoMarkPreview() {
     MarkContent(
         mark = null,
+        group = null,
+        isShared = false,
         onUpdate = {},
         onDelete = {},
         onBack = {},

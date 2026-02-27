@@ -39,6 +39,7 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -60,6 +61,7 @@ import kotlinx.coroutines.launch
 fun HistoryScreen(
     viewModel: LandmarkViewModel = hiltViewModel(),
     onBack: () -> Unit,
+    onSharedMarks: () -> Unit,
     onViewMark: (Int) -> Unit,
 ) {
     val marks = viewModel.marks.collectAsStateWithLifecycle(listOf())
@@ -69,6 +71,7 @@ fun HistoryScreen(
     HistoryContent(
         marks = marks.value,
         onBack = onBack,
+        onSharedMarks = onSharedMarks,
         onViewMark = onViewMark,
         onCopyToClipboard = { mark ->
             coroutineScope.launch {
@@ -94,21 +97,28 @@ fun HistoryContent(
     onViewMark: (Int) -> Unit,
     onCopyToClipboard: (Mark) -> Unit,
     onDeleteMarks: (List<Mark>) -> Unit,
+    onSharedMarks: () -> Unit,
 ) {
     val selectedMarks = remember { mutableStateListOf<Mark>() }
 
     Scaffold(
         topBar = {
-            HistoryTopBar(selectedMarks = selectedMarks, onBack = onBack, onClearSelection = {
-                selectedMarks.clear()
-            }, onDeleteSelected = {
-                onDeleteMarks(selectedMarks.toList())
-                selectedMarks.clear()
-            }, onSelectAll = {
-                marks.forEach {
-                    if (!selectedMarks.contains(it)) selectedMarks.add(it)
-                }
-            })
+            HistoryTopBar(
+                selectedMarks = selectedMarks,
+                onBack = onBack,
+                onSharedMarks = onSharedMarks,
+                onClearSelection = {
+                    selectedMarks.clear()
+                },
+                onDeleteSelected = {
+                    onDeleteMarks(selectedMarks.toList())
+                    selectedMarks.clear()
+                },
+                onSelectAll = {
+                    marks.forEach {
+                        if (!selectedMarks.contains(it)) selectedMarks.add(it)
+                    }
+                })
         },
     ) { paddingValues ->
         if (marks.isNotEmpty()) {
@@ -173,102 +183,129 @@ fun HistoryContent(
 fun HistoryTopBar(
     selectedMarks: List<Mark>,
     onBack: () -> Unit,
+    onSharedMarks: () -> Unit,
     onClearSelection: () -> Unit,
     onDeleteSelected: () -> Unit,
     onSelectAll: () -> Unit,
 ) {
-    var showMoreActions by remember { mutableStateOf(false) }
-
     if (selectedMarks.isEmpty()) {
         TopAppBar(
             title = {
-            Text(
-                text = "History",
-                fontWeight = FontWeight.Bold,
-            )
-        }, navigationIcon = {
-            IconButton(
-                onClick = onBack,
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Back",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                Text(
+                    text = "History",
+                    fontWeight = FontWeight.Bold,
                 )
-            }
-        }, colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        )
-        )
-    } else {
-        TopAppBar(
-            title = {
-            Text("${selectedMarks.size}")
-        }, navigationIcon = {
-            IconButton(
-                onClick = onClearSelection
-            ) {
-                Icon(
-                    imageVector = Icons.AutoMirrored.Filled.ArrowBack,
-                    contentDescription = "Clear selection",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-        }, colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = MaterialTheme.colorScheme.primaryContainer,
-            titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
-        ), actions = {
-            IconButton(
-                onClick = onDeleteSelected,
-            ) {
-                Icon(
-                    Icons.Default.Delete,
-                    contentDescription = "Delete selected",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-
-            IconButton(
-                onClick = {
-                    showMoreActions = !showMoreActions
-                }) {
-                Icon(
-                    Icons.Default.MoreVert,
-                    contentDescription = "More options",
-                    tint = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-                DropdownMenu(
-                    expanded = showMoreActions,
-                    onDismissRequest = { showMoreActions = false },
-                    modifier = Modifier.fillMaxWidth(0.4f)
+            }, navigationIcon = {
+                IconButton(
+                    onClick = onBack,
                 ) {
-                    DropdownMenuItem(text = {
-                        Text(
-                            text = "Select all",
-                            fontSize = 15.sp,
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Back",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }, colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ),
+            actions = {
+                var showActions by rememberSaveable { mutableStateOf(false) }
+                IconButton(
+                    onClick = { showActions = true },
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.MoreVert,
+                        contentDescription = "Actions",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    DropdownMenu(
+                        expanded = showActions,
+                        onDismissRequest = { showActions = false },
+                        modifier = Modifier.fillMaxWidth(0.4f)
+                    ) {
+                        DropdownMenuItem(
+                            text = { Text("Shared marks") },
+                            onClick = {
+                                showActions = false
+                                onSharedMarks()
+                            },
                         )
-                    }, onClick = {
-                        onSelectAll()
-                        showMoreActions = false
-                    })
+                    }
                 }
             }
-        })
+        )
+    } else {
+        var showMoreActions by rememberSaveable { mutableStateOf(false) }
+
+        TopAppBar(
+            title = {
+                Text("${selectedMarks.size}")
+            }, navigationIcon = {
+                IconButton(
+                    onClick = onClearSelection
+                ) {
+                    Icon(
+                        imageVector = Icons.AutoMirrored.Filled.ArrowBack,
+                        contentDescription = "Clear selection",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+            }, colors = TopAppBarDefaults.topAppBarColors(
+                containerColor = MaterialTheme.colorScheme.primaryContainer,
+                titleContentColor = MaterialTheme.colorScheme.onPrimaryContainer,
+            ), actions = {
+                IconButton(
+                    onClick = {
+                        showMoreActions = false
+                        onDeleteSelected()
+                    },
+                ) {
+                    Icon(
+                        Icons.Default.Delete,
+                        contentDescription = "Delete selected",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                }
+
+                IconButton(
+                    onClick = {
+                        showMoreActions = !showMoreActions
+                    }) {
+                    Icon(
+                        Icons.Default.MoreVert,
+                        contentDescription = "More options",
+                        tint = MaterialTheme.colorScheme.onPrimaryContainer,
+                    )
+                    DropdownMenu(
+                        expanded = showMoreActions,
+                        onDismissRequest = { showMoreActions = false },
+                        modifier = Modifier.fillMaxWidth(0.4f)
+                    ) {
+                        DropdownMenuItem(text = {
+                            Text(
+                                text = "Select all",
+                                fontSize = 15.sp,
+                            )
+                        }, onClick = {
+                            onSelectAll()
+                            showMoreActions = false
+                        })
+                    }
+                }
+            })
     }
 }
 
 @Composable
-fun HistoryItem(
-    mark: Mark,
+fun SelectableLazyColumnItem(
     selected: Boolean,
     modifier: Modifier = Modifier,
     onClick: () -> Unit,
     onLongClick: () -> Unit,
-    onCopyToClipboard: () -> Unit,
+    content: (@Composable () -> Unit),
 ) {
     val localIndication = LocalIndication.current
-    Log.d("landmark", "rendering with indication=$localIndication selected=$selected")
     var boxModifier = Modifier.combinedClickable(
         enabled = true,
         onClickLabel = null,
@@ -289,40 +326,83 @@ fun HistoryItem(
     Box(
         modifier = boxModifier,
     ) {
-        Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
-            Column {
-                Row {
-                    Text(
-                        text = "${mark.location.latitude}, ${mark.location.longitude}",
-                        fontSize = 12.sp,
-                        color = if (!selected) Color.Gray else MaterialTheme.colorScheme.onPrimaryContainer,
-                    )
-                }
-                Spacer(Modifier.height(5.dp))
+        content()
+    }
+}
 
-                val lines = mark.description.lines()
-                val text = if (lines.size > 1) {
-                    "${lines.first()}..."
-                } else {
-                    mark.description
-                }
-
-                Text(
-                    text = text,
-                    color = MaterialTheme.colorScheme.onPrimaryContainer,
-                )
-            }
-            Spacer(Modifier.weight(1f))
-
-            IconButton(
-                onClick = onCopyToClipboard,
-            ) {
-                Icon(
-                    imageVector = Icons.Filled.ContentCopy,
-                    contentDescription = "Copy to clipboard",
-                )
-            }
+@Composable
+fun MarkListItemInfo(
+    mark: Mark,
+    selected: Boolean = false,
+    modifier: Modifier = Modifier,
+) {
+    Column(modifier) {
+        Row {
+            Text(
+                text = "${mark.location.latitude}, ${mark.location.longitude}",
+                fontSize = 12.sp,
+                color = if (!selected) Color.Gray else MaterialTheme.colorScheme.onPrimaryContainer,
+            )
         }
+        Spacer(Modifier.height(5.dp))
+
+        val lines = mark.description.lines()
+        val text = if (lines.size > 1) {
+            "${lines.first()}..."
+        } else {
+            mark.description
+        }
+
+        Text(
+            text = text,
+            color = MaterialTheme.colorScheme.onPrimaryContainer,
+        )
+    }
+}
+
+@Composable
+fun CopyableMarkListItem(
+    mark: Mark,
+    modifier: Modifier = Modifier,
+    selected: Boolean = false,
+    onCopy: () -> Unit,
+) {
+    Row(modifier = modifier, verticalAlignment = Alignment.CenterVertically) {
+        MarkListItemInfo(mark, selected)
+
+        Spacer(Modifier.weight(1f))
+
+        IconButton(
+            onClick = onCopy,
+        ) {
+            Icon(
+                imageVector = Icons.Filled.ContentCopy,
+                contentDescription = "Copy to clipboard",
+            )
+        }
+    }
+}
+
+@Composable
+fun HistoryItem(
+    mark: Mark,
+    selected: Boolean,
+    modifier: Modifier = Modifier,
+    onClick: () -> Unit,
+    onLongClick: () -> Unit,
+    onCopyToClipboard: () -> Unit,
+) {
+    SelectableLazyColumnItem(
+        selected = selected,
+        onClick = onClick,
+        onLongClick = onLongClick,
+    ) {
+        CopyableMarkListItem(
+            mark = mark,
+            modifier = modifier,
+            selected = selected,
+            onCopy = onCopyToClipboard,
+        )
     }
 }
 
@@ -347,6 +427,7 @@ fun HistoryPreview() {
     HistoryContent(
         marks = marks,
         onBack = {},
+        onSharedMarks = {},
         onViewMark = {},
         onCopyToClipboard = {},
         onDeleteMarks = {})
@@ -359,6 +440,7 @@ fun HistoryNoMarksPreview() {
     HistoryContent(
         marks = marks,
         onBack = {},
+        onSharedMarks = {},
         onViewMark = {},
         onCopyToClipboard = {},
         onDeleteMarks = {})
